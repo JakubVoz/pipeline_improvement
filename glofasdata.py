@@ -1,12 +1,4 @@
-# import netCDF4
 import xarray as xr
-from os import listdir
-from os.path import isfile, join
-import pandas as pd
-
-from geocube.api.core import make_geocube
-import geopandas as gpd
-
 import json
 import datetime
 import urllib.request
@@ -14,15 +6,21 @@ import urllib.error
 import tarfile
 import time
 import ftplib
+import pandas as pd
+import geopandas as gpd
 
+import os
+import logging
+
+from os import listdir
+from os.path import isfile, join
+from geocube.api.core import make_geocube
 from flood_model.settings import *
 
 try:
     from flood_model.secrets import *
 except ImportError:
     print('No secrets file found.')
-import os
-import logging
 
 logger = logging.getLogger(__name__)
 
