@@ -1,29 +1,20 @@
 # import netCDF4
 import xarray as xr
-import numpy as np
-import os
 from os import listdir
 from os.path import isfile, join
 import pandas as pd
-from pandas import DataFrame
-import rioxarray
-import rasterio as rio
-from tqdm import tqdm
-import geocube
-import re
+
 from geocube.api.core import make_geocube
 import geopandas as gpd
-import sys
+
 import json
 import datetime
 import urllib.request
 import urllib.error
 import tarfile
 import time
-from ftplib import FTP
 import ftplib
-# import cdsapi
-from flood_model.dynamicDataDb import DatabaseManager
+
 from flood_model.settings import *
 
 try:
@@ -31,8 +22,6 @@ try:
 except ImportError:
     print('No secrets file found.')
 import os
-from rasterstats import zonal_stats
-import rasterio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -286,7 +275,6 @@ class GlofasData:
         '''
         extract point from Gridded glofas data
         '''
-        from rasterstats import zonal_stats
         import rasterio
 
         # bf_gpd= self.gdf_admin #self.gdf_extr_admin #self.admin_area_gdf
