@@ -1,46 +1,42 @@
-# import netCDF4
 import xarray as xr
-import numpy as np
-import os
-from os import listdir
-from os.path import isfile, join
-import pandas as pd
-from pandas import DataFrame
-import rioxarray
-import rasterio as rio
-from tqdm import tqdm
-import geocube
-import re
-from geocube.api.core import make_geocube
-import geopandas as gpd
-import sys
 import json
 import datetime
 import urllib.request
 import urllib.error
 import tarfile
 import time
-from ftplib import FTP
 import ftplib
-# import cdsapi
-from flood_model.dynamicDataDb import DatabaseManager
+import pandas as pd
+import geopandas as gpd
+
+import os
+import logging
+
+from os import listdir
+from os.path import isfile, join
+from geocube.api.core import make_geocube
 from flood_model.settings import *
 
 try:
     from flood_model.secrets import *
 except ImportError:
     print('No secrets file found.')
-import os
-from rasterstats import zonal_stats
-import rasterio
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 class GlofasData:
-
     def __init__(self, leadTimeLabel, leadTimeValue, countryCodeISO3, glofas_stations, district_mapping, admin_df):
+        """
+        Initialize the class with the required parameters.
+
+        :param leadTimeLabel: str, A label indicating the lead time e.g. '1-day', '3-days'.
+        :param leadTimeValue: str, The actual lead time value used for forecasting.
+        :param countryCodeISO3: str, The ISO 3166-1 alpha-3 code of the country.
+        :param glofas_stations: DataFrame, Data frame containing information about GLOFAS stations.
+        :param district_mapping: DataFrame, Data frame mapping districts to various administrative or geographical entities.
+        :param admin_df: GeoDataFrame, Geospatial dataframe containing administrative area information.
+        """
         # self.db = DatabaseManager(leadTimeLabel, countryCodeISO3)
 
         self.leadTimeLabel = leadTimeLabel
@@ -91,6 +87,15 @@ class GlofasData:
         self.gdf_extr_admin = gdf_admin.query(f'adminLevel == {self.admin_level_glofas_extr}')
 
     def process(self):
+        """
+        Processes the GLOFAS (Global Flood Awareness System) data based on the country code and settings.
+
+        This method carries out the necessary steps to manage and process GLOFAS data, either by
+        using mock data or by downloading, extracting, and analyzing real GLOFAS data. It differentiates
+        the workflow based on the country code and executes specific methods accordingly.
+
+        :return: None
+        """
         if SETTINGS[self.countryCodeISO3]['mock'] == True:
             self.extractMockData()
             self.findTrigger()
@@ -113,6 +118,13 @@ class GlofasData:
                 self.findTrigger()
 
     def removeOldGlofasData(self):
+        """
+        Removes old GLOFAS (Global Flood Awareness System) data files from the input directories.
+
+        This method checks the specified input paths related to GLOFAS data and deletes any existing files to
+        ensure a clean slate for the new data. If the directories do not exist, it creates them.
+        :return: None
+        """
         for filepath in [self.inputPath, self.inputPathGrid]:
             if os.path.exists(filepath):
                 for f in [f for f in os.listdir(filepath)]:
@@ -121,6 +133,15 @@ class GlofasData:
                 os.makedirs(filepath)
 
     def download(self):
+        """
+        Attempts to download GLOFAS (Global Flood Awareness System) data, retrying if there are failures,
+        until a maximum retry duration is reached.
+
+        This method continuously attempts to download data within a specified window of time, handling exceptions
+        and retrying after a delay if any exception occurs. If all attempts fail, it raises a ValueError.
+
+        :return: None
+        """
         downloadDone = False
 
         timeToTryDownload = 43200
@@ -143,6 +164,14 @@ class GlofasData:
                              str(timeToTryDownload / 3600) + ' hours, no new dataset was found')
 
     def makeFtpRequest(self):
+         """
+        Makes an FTP request to download the GLOFAS data file and saves it to the local input path.
+
+        This method constructs the FTP URL using provided credentials and downloads the GLOFAS data file
+        for the current date.
+
+        :return: None
+        """
         filename = self.GLOFAS_FILENAME + '_' + self.current_date + '00.tar.gz'
         ftp_path = 'ftp://' + GLOFAS_USER + ':' + GLOFAS_PW + '@' + self.GLOFAS_FTP
 
@@ -150,6 +179,15 @@ class GlofasData:
         # urllib.request.urlretrieve(ftp_path + filename,'/mnt/containermnt/glofas.nc')
 
     def makeFtpRequestNcFiles(self, filename_to_download):
+         """
+        Makes an FTP request to download GLOFAS NetCDF files and save them locally.
+
+        This method handles retries for FTP requests if temporary errors occur and ensures that the file
+        is saved to the specified local directory.
+
+        :param filename_to_download: str, The name of the file to download from the FTP server.
+        :return: None
+        """
         GLOFAS_FTP_GRID = f'aux.ecmwf.int/fc_netcdf/{self.current_date}/'
         filename_local = self.inputPathGrid + 'glofas.nc'
 
@@ -179,11 +217,13 @@ class GlofasData:
 
     def downloadFtpChunks(self):
         """
-        Download a glofas data from a URL in chunks and save it to a local file.
-        extract data for admin area
-        generate csv files for each admin area
-        """
+        Downloads GLOFAS data in chunks for each ensemble and saves it to a local file.
 
+        This method loops through available ensembles, making corresponding FTP requests for each
+        and processing the resulting NetCDF files to extract and save the relevant data.
+
+        :return: None
+        """
         logger.info(f'start downloading glofas data for ensemble')
         # The following extent will download data for the extent of Zambia, Uganda,Kenya,Ethiopia and South Sudan
         min_lon = 21  # 21 Minimum longitude
@@ -219,6 +259,14 @@ class GlofasData:
         logger.info('finished downloading data ')
 
     def start_download_loop(self):
+        """
+        Initiates a loop to download GLOFAS data, handling retries in case of failures.
+
+        This method continuously attempts to download data for a specific duration, handling country-specific
+        download strategies and retrying after a delay if any error occurs. It raises a ValueError if all attempts fail.
+
+        :return: None
+        """
         downloadDone = False
         timeToTryDownload = 43200
         timeToRetry = 6
@@ -244,9 +292,14 @@ class GlofasData:
                              str(timeToTryDownload / 3600) + ' hours, no new dataset was found')
 
     def zonalStatGlofasDataGridToCsv(self):
-        '''
-        zonal statistics for Gridded glofas data
-        '''
+        """
+        Performs zonal statistics on GLOFAS data grids and saves the results to CSV files.
+
+        This method calculates statistics such as maximum and median discharge values for different administrative
+        areas (zones) and saves the results in CSV files.
+
+        :return: None
+        """
         from rasterstats import zonal_stats
         import rasterio
 
@@ -283,10 +336,14 @@ class GlofasData:
         logger.info(f'saved csv files for all ensembles')
 
     def pointGlofasDataGridToCsv(self):
-        '''
-        extract point from Gridded glofas data
-        '''
-        from rasterstats import zonal_stats
+        """
+        Extracts point data from GLOFAS data grids and saves the results to CSV files for specified coordinates.
+
+        This method processes point data for designated administrative areas and GLOFAS stations, saving
+        the results to CSV files.
+
+        :return: None
+        """
         import rasterio
 
         # bf_gpd= self.gdf_admin #self.gdf_extr_admin #self.admin_area_gdf
@@ -337,6 +394,14 @@ class GlofasData:
         logger.info(f'saved csv files for all ensembles')
 
     def getGlofasData(self):
+        """
+        Retrieves GLOFAS data from a tar.gz file and extracts the contents to the input path.
+
+        This method handles the retrieval and extraction of GLOFAS discharge and return period data
+        from specified tar.gz files.
+
+        :return: None
+        """
         filename = self.GLOFAS_FILENAME + '_' + self.current_date + '00.tar.gz'
         path = 'glofas/' + filename
 
@@ -349,9 +414,15 @@ class GlofasData:
         tar.close()
 
     def checkTriggerProb(self, num):
-        '''
-        Classify EAP Alert based on flood forecast probability specified in settings.py
-        '''
+        """
+        Classifies EAP Alert based on flood forecast probability specified in settings.
+
+        This method determines the alert class based on the provided flood forecast probability
+        and the threshold values specified in the settings.
+
+        :param num: float, The flood forecast probability.
+        :return: str, The corresponding EAP Alert classification.
+        """
         if self.countryCodeISO3 in ['ZMB']:
             if num <= self.eapAlertClass['no']:
                 return "no"
@@ -368,10 +439,15 @@ class GlofasData:
                 return "no"
 
     def classifyEapAlert(self, num):
-        '''
-        Classify EAP Alert based on flood forecast return period specified in settings.py
-        Applicable only for Uganda
-        '''
+        """
+        Classifies EAP Alert based on flood forecast return period specified in settings.
+
+        This method determines the alert class based on the provided flood forecast return period
+        and the threshold values specified in the settings. Applicable only for Uganda (UGA).
+
+        :param num: int, The flood forecast return period.
+        :return: str, The corresponding EAP Alert classification.
+        """
         if not num:
             return "no"
         elif num >= self.eapAlertClass['max']:
@@ -384,6 +460,14 @@ class GlofasData:
             return "no"
 
     def extractGlofasDataGrid(self):
+        """
+        Extracts GLOFAS data from the grid and saves trigger per day information to JSON.
+
+        This method aggregates discharge data for each administrative area and ensemble, compares it against
+        set thresholds, and saves the results into CSV files and JSON formatted trigger information per day.
+
+        :return: None
+        """
         trigger_per_day = {
             "1-day": {"triggered": False, "thresholdReached": False},
             "2-day": {"triggered": False, "thresholdReached": False},
@@ -479,6 +563,14 @@ class GlofasData:
             logger.info('Extracted Glofas data - Trigger per day File saved_')
 
     def extractGlofasData(self):
+        """
+        Extracts GLOFAS data from downloaded or mocked files, processes them, and saves the trigger and forecast information.
+
+        This method handles extraction, merging, and processing of GLOFAS discharge and return period data,
+        determining the trigger levels, and saving the results.
+
+        :return: None
+        """
 
         logger.info('\nExtracting Glofas (FTP) Data\n')
 
@@ -610,6 +702,12 @@ class GlofasData:
             logger.info('Extracted Glofas data - Trigger per day File saved')
 
     def extractMockData(self):
+        """
+        Extracts mock GLOFAS data for testing purposes and saves the trigger information.
+        This method simulates GLOFAS data extraction by creating mock data for testing the pipeline,
+        and saves the results in the same format as real data.
+        :return: None
+        """
         logger.info('\nExtracting Glofas (mock) Data\n')
 
         # Load input data
@@ -725,6 +823,14 @@ class GlofasData:
             logger.info('Extracted Glofas data - Trigger per day File saved')
 
     def findTrigger(self):
+        """
+        Finds triggers for flood events based on extracted GLOFAS data and threshold values.
+
+        This method processes the extracted discharge data, compares it with predefined thresholds, and identifies
+        flood triggers, saving the results.
+
+        :return: None
+        """
         # Load (static) threshold values per station
         df_thresholds = pd.read_json(json.dumps(self.GLOFAS_STATIONS))
         df_thresholds = df_thresholds.set_index("stationCode", drop=False)
@@ -789,133 +895,3 @@ class GlofasData:
         with open(self.triggersPerStationPath, 'w') as fp:
             fp.write(out)
             logger.info('Processed Glofas data - File saved')
-
-    def extractGlofasDataGridToCsv_old(self):
-
-        bf_gpd = self.admin_area_gdf
-
-        bf_gpd['pcode'] = bf_gpd['placeCode'].apply(lambda x: int(x[len(self.countryCodeISO3):]))
-
-        bbox_bfs = list(bf_gpd.total_bounds)
-
-        # Load input data
-        filename = self.GLOFAS_GRID_FILENAME + '_' + self.current_date + '00.nc'
-        # filename ='/mnt/containermnt/glofas.nc'
-        Filename = os.path.join(self.inputPathGrid, filename)
-        nc_file = xr.open_dataset(Filename)
-        var_data = nc_file.sel(lat=slice(bbox_bfs[3], bbox_bfs[1]), lon=slice(bbox_bfs[0], bbox_bfs[2]))
-        df_leadtime_ens = []
-
-        for i in range(0, 7):
-            leadTimelabel = str(i + 1) + '_day'
-            for ens in range(0, 51):
-                nc_p = var_data.sel(time=var_data.time.values[i], ensemble=var_data.ensemble.values[ens]).drop(
-                    ['time', 'ensemble']).rio.write_crs("epsg:4326", inplace=True)
-
-                out_grid = make_geocube(
-                    vector_data=bf_gpd,
-                    measurements=['pcode'],
-                    like=nc_p)
-
-                out_grid = out_grid.rename({'x': 'lon', 'y': 'lat'})
-                for gof_var in ['dis', 'rl2', 'rl5', 'rl20']:
-                    glofas_rtp = nc_p[gof_var]
-                    out_grid[gof_var] = (glofas_rtp.dims, glofas_rtp.values)
-
-                zonal_stats_df = (out_grid.groupby(out_grid['pcode']).max().to_dataframe().reset_index())
-                zonal_stats_df['pcode'] = zonal_stats_df['pcode'].apply(
-                    lambda x: self.placeCodeInitial + str(int(x)).zfill(self.placecodeLen))
-                zonal_stats_df['ensemble'] = ens + 1
-
-                zonal_stats_df['leadTime'] = leadTimelabel
-                df_leadtime_ens.append(
-                    zonal_stats_df.filter(['pcode', 'ensemble', 'leadTime', 'dis', 'rl2', 'rl5', 'rl20']))
-
-        glofasDffinal = pd.concat(df_leadtime_ens)
-
-        glofasDffinal.to_csv(self.glofasAdmnPerDay)
-
-        logger.info('Extracted Glofas data from grid- discharge per day File saved')
-
-        nc_file.close()
-
-    def downloadFtpChunks_old(self):
-        """
-        Download a glofas data from a URL in chunks and save it to a local file.
-        extract data for admin area
-        generate csv files for each admin area
-        """
-        # Open a connection to the URL
-        bf_gpd = self.admin_area_gdf
-
-        bf_gpd['pcode'] = bf_gpd['placeCode'].apply(lambda x: int(x[len(self.countryCodeISO3):]))
-        bbox_bfs = list(bf_gpd.total_bounds)
-        logger.info(f'start downloading glofas data for ensemble')
-
-        for ens in range(0, 51):
-            ensemble = "{:02d}".format(ens)
-            # logger.info(f'start downloading data for ensemble {ens}')
-
-            url = f'ftp://{GLOFAS_USER}:{GLOFAS_PW}@{GLOFAS_FTP}/fc_netcdf/{self.current_date}/dis_{ensemble}_{self.current_date}00.nc'
-            chunk_size = 8192
-
-            Filename = self.inputPathGrid + 'glofas.nc'
-
-            with urllib.request.urlopen(url) as response:
-                # Open the local file for writing the downloaded content
-                with open(Filename, 'wb') as out_file:
-                    # Initialize a counter for the downloaded bytes
-                    bytes_downloaded = 0
-
-                    while True:
-                        # Read a chunk from the response
-                        chunk = response.read(chunk_size)
-                        # If the chunk is empty, we have downloaded the entire file
-                        if not chunk:
-                            break
-                        # Write the chunk to the local file
-                        out_file.write(chunk)
-                        # Update the counter
-                        bytes_downloaded += len(chunk)
-                        # print(f"Downloaded {bytes_downloaded} bytes")
-            if out_file:
-                out_file.close()
-            # logger.info(f'finished downloading data for ensemble {ens}')
-            nc_file = xr.open_dataset(Filename)
-            var_data = nc_file.sel(lat=slice(bbox_bfs[3], bbox_bfs[1]), lon=slice(bbox_bfs[0], bbox_bfs[2]))
-            df_leadtime_ens = []
-
-            for i in range(0, 7):
-                leadTimelabel = str(i + 1) + '_day'
-                nc_p = var_data.sel(time=var_data.time.values[i]).drop(['time']).rio.write_crs("epsg:4326",
-                                                                                               inplace=True)
-
-                out_grid = make_geocube(
-                    vector_data=bf_gpd,
-                    measurements=['pcode'],
-                    like=nc_p)
-
-                out_grid = out_grid.rename({'x': 'lon', 'y': 'lat'})
-                for gof_var in ['dis']:
-                    glofas_rtp = nc_p[gof_var]
-                    out_grid[gof_var] = (glofas_rtp.dims, glofas_rtp.values)
-
-                zonal_stats_df = (out_grid.groupby(out_grid['pcode']).max().to_dataframe().reset_index())
-                zonal_stats_df['pcode'] = zonal_stats_df['pcode'].apply(
-                    lambda x: self.placeCodeInitial + str(int(x)).zfill(self.placecodeLen))
-                zonal_stats_df['ensemble'] = ens
-                zonal_stats_df[f'dis_{ensemble}'] = zonal_stats_df['dis']
-
-                zonal_stats_df['leadTime'] = leadTimelabel
-                df_leadtime_ens.append(
-                    zonal_stats_df.filter(['pcode', 'ensemble', 'leadTime', 'dis', 'rl2', 'rl5', 'rl20']))
-
-            glofasDffinal = pd.concat(df_leadtime_ens)
-
-            FilenameCsv = self.inputPathGrid + f'glofas_{ens}.csv'
-            logger.info(f'saved csv files for ensemble {ens}')
-
-            glofasDffinal.to_csv(FilenameCsv)
-            # glofasDffinal.to_csv(f'/mnt/containermnt/glofas_{ens}.csv')
-            nc_file.close()
-        logger.info(f'finished downloading data per chunk')
